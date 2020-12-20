@@ -10,7 +10,9 @@
 
 .dseg
 	//.org	$0100
-	TEXT:	.byte 16
+	TEXT:	.byte 16		//Text
+	DISP_STATUS: .byte 1	//Display on or off?
+	POSITION: .byte 1		//Cursor position
 .cseg
 
 
@@ -30,6 +32,8 @@ START:
 	ldi		r16, LOW(RAMEND)
 	out		SPL, r16
 
+	
+
 	call	INIT_PORTS
 	
 	call	LCD_INIT
@@ -37,11 +41,19 @@ START:
 	ldi		r16, 10
 	call	DELAY
 	
+	//Set cursor pos to 0
+	ldi		ZH, HIGH(POSITION)
+	ldi		ZL, LOW(POSITION)
+	ldi		r16, 0				
+	st		Z, r16
+
+
 	call	MAIN
-	call	LCD_HOME
+	
 
 
 LCD_INIT:
+
 	call	BACKLIGHT_OFF
 	call	DELAY
 	call	BACKLIGHT_ON
@@ -60,6 +72,7 @@ LCD_INIT:
 
 	; --- Display on , cursor on , cursor blink
 	ldi		r16 , DISP_ON
+	
 	call	LCD_COMMAND
 
 	; --- Clear display
@@ -73,17 +86,32 @@ LCD_INIT:
 	ret
 
 MAIN:
-	call	TEXT_TEST
+	call	INIT_LINE
 	ldi		ZH, HIGH(TEXT)
 	ldi		ZL, LOW(TEXT)
 	call	LCD_PRINT
 
+	call	LCD_HOME
 
+	ldi		ZH, HIGH(POSITION)			//)
+	ldi		ZL, LOW(POSITION)
+	ldi		r19, 0
+	st		Z, r19
+	
+	
 LOOP:
 	call	KEY_READ
+	cpi		r16, 1
+	breq	CALL_SELECT
 
 	cpi		r16, 2
 	breq	CALL_LEFT
+
+	cpi		r16, 3
+	breq	call_down
+
+	cpi		r16, 4
+	breq	CALL_UP
 
 	cpi		r16, 5
 	breq	CALL_RIGHT
@@ -91,20 +119,40 @@ LOOP:
 	jmp		LOOP
 
 
+CALL_SELECT:
+	call	SELECT
+	jmp		LOOP
 
 CALL_LEFT:
 	call	LEFT
+	jmp		LOOP
+
+CALL_UP:
+	call	UP
+	jmp		LOOP
+
+CALL_DOWN:
+	call	DOWN
 	jmp		LOOP
 
 CALL_RIGHT:
 	call	RIGHT
 	jmp		LOOP
 
+
 BACKLIGHT_ON:
+	ldi		YH, HIGH(DISP_STATUS)
+	ldi		YL, LOW(DISP_STATUS)
+	ldi		r22, $FF
+	st		Y, r22
 	sbi		PORTB, 2
 	ret
 
 BACKLIGHT_OFF:
+	ldi		YH, HIGH(DISP_STATUS)
+	ldi		YL, LOW(DISP_STATUS)
+	ldi		r22, $08
+	st		Y, r22
 	cbi		PORTB, 2
 	ret
 
@@ -144,27 +192,117 @@ LCD_HOME:
 LCD_COL:
 	ldi		r17, $80
 	add		r16, r17
-	dec		r16
 	call	LCD_COMMAND
 	ret
 	
+SELECT:
+	ldi		YH, HIGH(DISP_STATUS)
+	ldi		YL, LOW(DISP_STATUS)
+	ld		r22, Y
+	cpi		r22, $FF
+	breq	TURN_OFF
+	call	BACKLIGHT_ON 
+	ret
+
+TURN_OFF:	
+	call	BACKLIGHT_OFF
+	ret
+
+
+
 LEFT:
+	ldi		ZH, HIGH(POSITION)
+	ldi		ZL, LOW(POSITION)
+	ld		r19, Z
 	cpi		r19, 0
 	breq	LEFT_EXIT
 	dec		r19
+	st		Z, r19
 	mov		r16, r19
 	call	LCD_COL
 LEFT_EXIT:
 	ret
 
 RIGHT:
-	cpi		r19, $10
+	ldi		ZH, HIGH(POSITION)
+	ldi		ZL, LOW(POSITION)
+	ld		r19, Z
+	cpi		r19, $0F
 	breq	RIGHT_EXIT
-	inc		r19			//Kan man spara i r19 eller SRAM? FRÅGA MICKE
+	inc		r19		
+	st		Z, r19
 	mov		r16, r19
 	call	LCD_COL
 RIGHT_EXIT:
 	ret
+
+
+
+UP:
+	ldi		ZH, HIGH(TEXT)
+	ldi		ZL, LOW(TEXT)
+	ldi		YH, HIGH(POSITION)
+	ldi		YL, LOW(POSITION)
+
+	ld		r19, Y
+	add		ZL, r19			
+	ld		r16, Z
+	
+	cpi		r16, $5A
+	breq	SET_A
+	cpi		r16, $20
+	breq	SET_A
+
+	inc		r16
+	st		Z, r16
+	jmp		EXIT_UP
+SET_A:
+	ldi		r16, $41
+	st		Z, r16
+EXIT_UP:
+	call	LCD_HOME
+	ldi		ZH, HIGH(TEXT)
+	ldi		ZL, LOW(TEXT)
+	call	LCD_PRINT
+	mov		r16, r19
+	call	LCD_COL
+	ret
+	
+
+
+DOWN:
+	ldi		ZH, HIGH(TEXT)
+	ldi		ZL, LOW(TEXT)
+
+	ldi		YH, HIGH(POSITION)
+	ldi		YL, LOW(POSITION)
+	
+	ld		r19, Y
+	add		ZL, r19			
+	ld		r16, Z
+	
+	cpi		r16, $41
+	breq	SET_SPACE
+
+	cpi		r16, $20
+	breq	SET_SPAcE
+
+	dec		r16
+	st		Z, r16
+	jmp		EXIT_DOWN
+SET_SPACE:
+	ldi		r16, $20
+	st		Z, r16
+
+EXIT_DOWN:
+	call	LCD_HOME
+	ldi		ZH, HIGH(TEXT)
+	ldi		ZL, LOW(TEXT)
+	call	LCD_PRINT
+	mov		r16, r19
+	call	LCD_COL
+	ret	
+
 
 
 DONE:
@@ -187,37 +325,6 @@ LCD_PRINT_HEX:
 PRINT_DONE:
 	ret
 
-
-HIGHER_NIBBLE:	
-			
-	
-	cpi		r16, $0A
-
-	brmi	BELOW_TEN
-
-	ldi		r18, $37
-	add		r16, r18
-	jmp		CONVERT_EXIT
-
-
-LOWER_NIBBLE:	
-	mov		r17, r16
-	swap	r17
-	andi	r17, $F0
-	cpi		r17, $0A
-
-	brmi	BELOW_TEN
-
-	ldi		r18, $37
-	add		r17, r18
-	jmp		CONVERT_EXIT
-
-BELOW_TEN:
-	ldi		r18, $30
-	add		r17, r18
-
-CONVERT_EXIT:
-	ret
 
 PRINT_NIBBLE:
 	cpi		r16, $0A
@@ -303,9 +410,7 @@ KEY_FIVE:
 
 KEY_EXIT:
 	ret
-
-
-
+	
 
 KEY_READ :
 	call KEY
@@ -320,23 +425,22 @@ KEY_WAIT_FOR_PRESS :
 	ret
 
 
-TEXT_TEST:
+INIT_LINE:
 	ldi		ZH, HIGH(TEXT)
 	ldi		ZL, LOW(TEXT)
 
-	ldi		r16, $41
+	ldi		r16, $20
 	ldi		r17, 0
-	call	TEXT_LOOP
+	call	LINE_LOOP
 	ret
 
-TEXT_LOOP:
-	inc		r16
-	inc		r17
-	cpi		r17, 5
-	breq	TEXT_LOOP_EXIT
+LINE_LOOP:
+	cpi		r17, $10
+	breq	INIT_LINE_EXIT
 	st		Z+, r16
-	jmp		TEXT_LOOP
-TEXT_LOOP_EXIT:
+	inc		r17
+	jmp		LINE_LOOP
+INIT_LINE_EXIT:
 	ldi		r16, 0
 	st		Z, r16
 	ret
@@ -351,13 +455,16 @@ LCD_PRINT:
 	LCD_PRINT_DONE:
 	ret
 
+
+
+
 WAIT:
-	adiw	r24,1
+	adiw	r24, $01
 	brne	WAIT
 	ret
 	
 	DELAY:
-	ldi		r16, 1
+	ldi		r16, $01
 	DELAY_LOOP:
 	call	WAIT
 	dec		r16
